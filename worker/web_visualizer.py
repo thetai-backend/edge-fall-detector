@@ -259,5 +259,8 @@ def index():
         Giám Sát Té Ngã Trực Tiếp
         """
 if __name__ == "__main__":
-    print("[SERVER] Dang khoi dong Web Server tai cong 5000...")
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    print("==================================================")
+    print("  HE THONG DA SAN SANG!")
+    print("  Mo trinh duyet truy cap: http://127.0.0.1:5000")
+    print("==================================================")
+    app.run(host="0.0.0.0", port=5000, threaded=True, debug=False)
