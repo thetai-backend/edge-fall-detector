@@ -251,12 +251,50 @@ def generate_frames():
 @app.route("/")
 def index():
     return """
-    
-    
-    
-        
-        Giám Sát Té Ngã Trực Tiếp
-        """
+    <!doctype html>
+    <html lang="vi">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Giám sát té ngã</title>
+        <style>
+            body {
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #111;
+                color: white;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+            }
+            .container {
+                width: min(96vw, 1100px);
+                text-align: center;
+            }
+            h1 {
+                margin-bottom: 16px;
+            }
+            img {
+                width: 100%;
+                max-height: 80vh;
+                border: 3px solid #2b8cff;
+                border-radius: 10px;
+                background: #000;
+                object-fit: contain;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Giám sát té ngã</h1>
+            <img src="/video_feed" alt="Live fall detection video">
+        </div>
+    </body>
+    </html>
+    """
+
+
 @app.route("/video_feed")
 def video_feed():
     return Response(
