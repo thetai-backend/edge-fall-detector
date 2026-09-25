@@ -30,7 +30,6 @@ KEYPOINT_CONNECTIONS = [
     (11, 13), (13, 15), (12, 14), (14, 16)
 ]
 
-
 class PersonTracker:
     def __init__(self, track_id):
         self.track_id = track_id
@@ -57,9 +56,9 @@ class PersonTracker:
 
     def update(self, keypoints, box, current_time):
         self.last_seen = current_time
-        ls, rs = keypoints[5], keypoints[6]    # Vai trái, vai phải
-        lh, rh = keypoints[11], keypoints[12]  # Hông trái, hông phải
-        la, ra = keypoints[15], keypoints[16]  # Cổ chân trái, phải
+        ls, rs = keypoints[5], keypoints[6]
+        lh, rh = keypoints[11], keypoints[12]
+        la, ra = keypoints[15], keypoints[16]
 
         if ls[2] < 0.20 or rs[2] < 0.20 or lh[2] < 0.20 or rh[2] < 0.20:
             return None, 0.0, self.aspect_ratio
@@ -100,12 +99,10 @@ class PersonTracker:
         self.speed_history.append(speed)
         recent_max_speed = max(self.speed_history) if self.speed_history else 0.0
 
-        # Điều kiện nằm sàn thực sự
         is_bounding_box_horizontal = self.aspect_ratio >= ASPECT_RATIO_THRESHOLD
         is_standing_bent = (self.aspect_ratio < 0.75) or (has_ankles and hip_ankle_drop > 0.35)
         is_true_lying = (body_angle > ANGLE_THRESHOLD) and (is_bounding_box_horizontal or body_angle > 75) and (not is_standing_bent)
 
-        # Cỗ máy trạng thái (State Machine)
         if self.state == STATE_NORMAL:
             had_fast_motion = recent_max_speed > SPEED_THRESHOLD
             if is_true_lying and (had_fast_motion or (body_angle > 70 and is_bounding_box_horizontal)):
@@ -142,14 +139,16 @@ class PersonTracker:
 app = Flask(__name__)
 
 producer = PhoneCameraProducer().start()
-worker = YOLOPoseWorker(model_path="models/yolo26n-pose.pt", conf_thresh=0.25, imgsz=640)
+
+# TỐI ƯU 1: Giảm imgsz xuống 320 để CPU điện thoại xử lý siêu tốc
+worker = YOLOPoseWorker(model_path="models/yolo26n-pose.pt", conf_thresh=0.25, imgsz=320)
 trackers = {}
 
 
 def generate_frames():
     global trackers
     prev_time = time.time()
-    fps_smooth = 15.0
+    fps_smooth = 10.0
 
     while True:
         frame = producer.get_latest_frame(timeout=1.0)
@@ -159,8 +158,14 @@ def generate_frames():
 
         now = time.time()
         dt = now - prev_time
+
+        # TỐI ƯU 2: KHÓA FPS (MAX 10 khung hình/giây). Nếu nhanh quá, bỏ qua để không làm sập mạng trình duyệt.
+        if dt < 0.1:
+            time.sleep(0.01)
+            continue
+
         prev_time = now
-        current_fps = (1.0 / dt) if dt > 0 else 15.0
+        current_fps = (1.0 / dt) if dt > 0 else 10.0
         fps_smooth = 0.85 * fps_smooth + 0.15 * current_fps
 
         h, w, _ = frame.shape
@@ -181,23 +186,20 @@ def generate_frames():
             angle, speed, ar = tracker.update(kpts, box, now)
             state = tracker.state
 
-            # Chọn màu theo trạng thái
             if state == STATE_CONFIRMED:
-                box_color = (0, 0, 255)      # Đỏ
+                box_color = (0, 0, 255)
                 any_confirmed_fall = True
             elif state == STATE_SUSPECTED:
-                box_color = (0, 165, 255)    # Cam
+                box_color = (0, 165, 255)
             else:
-                box_color = (0, 255, 0)      # Xanh lá
+                box_color = (0, 255, 0)
 
             x1, y1, x2, y2 = map(int, box)
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w - 1, x2), min(h - 1, y2)
 
-            # Vẽ bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
-            # Nhãn trạng thái
             tag = f"ID:{tid} | {state}"
             if state == STATE_SUSPECTED and tracker.suspected_start_time:
                 remain = max(0.0, CONFIRM_DURATION - (now - tracker.suspected_start_time))
@@ -209,39 +211,34 @@ def generate_frames():
             cv2.rectangle(frame, (x1, max(0, y1 - th - 8)), (x1 + tw + 6, y1), box_color, -1)
             cv2.putText(frame, tag, (x1 + 3, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 2)
 
-            # Vẽ Skeleton
             for p1_idx, p2_idx in KEYPOINT_CONNECTIONS:
                 if kpts[p1_idx][2] > 0.20 and kpts[p2_idx][2] > 0.20:
                     pt1 = (int(kpts[p1_idx][0] * w), int(kpts[p1_idx][1] * h))
                     pt2 = (int(kpts[p2_idx][0] * w), int(kpts[p2_idx][1] * h))
                     cv2.line(frame, pt1, pt2, (255, 255, 0), 2)
 
-            # Vẽ Khớp xương
             for kpt in kpts:
                 if kpt[2] > 0.20:
                     cv2.circle(frame, (int(kpt[0] * w), int(kpt[1] * h)), 3, (0, 255, 255), -1)
 
-        # Xóa tracker cũ không xuất hiện sau 10 giây
         expired_ids = [tid for tid, trk in trackers.items() if now - trk.last_seen > 10.0]
         for tid in expired_ids:
             del trackers[tid]
 
-        # Thanh trạng thái trên cùng
         cv2.rectangle(frame, (0, 0), (w, 40), (30, 30, 30), -1)
         cv2.putText(frame, f"Fall Detection Live | FPS: {fps_smooth:.1f}", (15, 27),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
         cv2.putText(frame, f"Tracking: {len(active_ids)}", (w - 160, 27),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
 
-        # Cảnh báo toàn màn hình khi có té ngã
         if any_confirmed_fall:
             cv2.rectangle(frame, (0, 0), (w - 1, h - 1), (0, 0, 255), 8)
             cv2.rectangle(frame, (w // 2 - 220, 50), (w // 2 + 220, 95), (0, 0, 255), -1)
             cv2.putText(frame, "!!! FALL DETECTED !!!", (w // 2 - 190, 83),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-        # Mã hóa JPEG chất lượng 65 để giảm băng thông và tải CPU
-        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+        # TỐI ƯU 3: Giảm chất lượng nén JPEG để tiết kiệm băng thông truyền tải về laptop
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 45])
         if not ret:
             continue
 
