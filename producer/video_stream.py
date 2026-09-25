@@ -2,7 +2,7 @@ import cv2
 import threading
 import queue
 import time
-from config import config
+from .config import config
 
 class PhoneCameraProducer:
     def __init__(self, source=config.SOURCE_URL):
