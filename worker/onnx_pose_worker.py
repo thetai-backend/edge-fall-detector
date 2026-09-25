@@ -3,7 +3,7 @@ import numpy as np
 import onnxruntime as ort
 
 class ONNXPoseWorker:
-    def __init__(self, model_path="models/yolo26n-pose.onnx", conf_thresh=0.35, iou_thresh=0.45, imgsz=320):
+    def __init__(self, model_path="models/yolo26n-pose.onnx", conf_thresh=0.35, iou_thresh=0.45, imgsz=416):
         self.conf_thresh = conf_thresh
         self.iou_thresh = iou_thresh
         self.imgsz = imgsz
@@ -21,7 +21,7 @@ class ONNXPoseWorker:
         )
         self.input_name = self.session.get_inputs()[0].name
 
-    def _letterbox(self, im, new_shape=(320, 320), color=(114, 114, 114)):
+    def _letterbox(self, im, new_shape=(416, 416), color=(114, 114, 114)):
         shape = im.shape[:2]  # shape hiện tại [height, width]
         r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
         new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
@@ -96,3 +96,54 @@ class ONNXPoseWorker:
                 })
 
         return detected_persons
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+    import time
+
+    # Tắt thông báo warning quét GPU của ONNX Runtime
+    os.environ["ORT_LOGGING_LEVEL"] = "3"
+
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from producer.video_stream import PhoneCameraProducer
+
+    print("==================================================")
+    print("  KHOI DONG HE THONG ONNX (HEADLESS MODE)")
+    print("  Khong giao dien Web - Toi uu 100% CPU")
+    print("==================================================")
+
+    producer = PhoneCameraProducer().start()
+    # Kích thước 416x416 chuẩn với model ONNX hiện tại của bạn
+    worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.25, imgsz=416)
+
+    prev_time = time.time()
+    frame_count = 0
+
+    try:
+        while True:
+            frame = producer.get_latest_frame(timeout=1.0)
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            # Chạy suy luận trực tiếp bằng ONNX
+            t0 = time.time()
+            persons = worker.process_frame(frame)
+            infer_time = (time.time() - t0) * 1000
+
+            frame_count += 1
+            now = time.time()
+
+            # Mỗi 1 giây in tốc độ FPS và thời gian suy luận một lần
+            if now - prev_time >= 1.0:
+                fps = frame_count / (now - prev_time)
+                print(f"[AI RUNNING] FPS: {fps:.1f} | Latency: {infer_time:.1f}ms | So nguoi: {len(persons)}")
+                frame_count = 0
+                prev_time = now
+
+    except KeyboardInterrupt:
+        print("\nDa dung he thong.")    
+
+    
