@@ -248,8 +248,7 @@ def generate_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
-
-@app.route('/')
+@app.route("/")
 def index():
     return """
     
@@ -258,10 +257,12 @@ def index():
         
         Giám Sát Té Ngã Trực Tiếp
         """
-
-@app.route('/video_feed')
+@app.route("/video_feed")
 def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
+
 
 if __name__ == "__main__":
     print("==================================================")
