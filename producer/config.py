@@ -3,7 +3,7 @@ import os
 class StreamConfig:
     # 1. NGUON STREAM NOI BO (LOOPBACK)
     # 127.0.0.1 tro truc tiep vao RAM may, khong qua mang ngoai
-    SOURCE_URL = os.getenv("CAMERA_SOURCE", "http://127.0.0.1:8080/video")
+    SOURCE_URL = os.getenv("CAMERA_SOURCE", "http://192.168.0.112:8080/video")
 
     # 2. HANG DOI (QUEUE)
     # Cực kỳ quan trọng tren dien thoai: Queue = 1 de khong bao gio bi tran RAM
