@@ -11,7 +11,7 @@ from flask import Flask, Response
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from producer.video_stream import PhoneCameraProducer
-from worker.yolo_worker import YOLOPoseWorker
+from worker.onnx_pose_worker import ONNXPoseWorker
 
 # ==================== CẤU HÌNH LOGIC TÉ NGÃ ====================
 ANGLE_THRESHOLD = 50           # Góc nghiêng thân người (>50 độ)
@@ -141,7 +141,7 @@ app = Flask(__name__)
 producer = PhoneCameraProducer().start()
 
 # TỐI ƯU 1: Giảm imgsz xuống 320 để CPU điện thoại xử lý siêu tốc
-worker = YOLOPoseWorker(model_path="models/yolo26n-pose.pt", conf_thresh=0.25, imgsz=320)
+worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.35, imgsz=320)
 trackers = {}
 
 
