@@ -11,6 +11,7 @@ from flask import Flask, Response
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from producer.video_stream import PhoneCameraProducer
+
 from worker.onnx_pose_worker import ONNXPoseWorker
 
 # ==================== CẤU HÌNH LOGIC TÉ NGÃ ====================
@@ -140,40 +141,41 @@ app = Flask(__name__)
 
 producer = PhoneCameraProducer().start()
 
-# TỐI ƯU 1: Giảm imgsz xuống 320 để CPU điện thoại xử lý siêu tốc
-worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.35, imgsz=320)
+# Tối ưu imgsz xuống 256 để nhẹ hơn 40% so với 320
+worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.25, imgsz=256)
 trackers = {}
 
 
 def generate_frames():
     global trackers
     prev_time = time.time()
-    fps_smooth = 10.0
+    fps_smooth = 12.0
+    frame_counter = 0
+    cached_persons = []  # Lưu kết quả AI gần nhất
 
     while True:
-        frame = producer.get_latest_frame(timeout=1.0)
+        frame = producer.get_latest_frame(timeout=0.2)
         if frame is None:
             time.sleep(0.01)
             continue
 
+        frame_counter += 1
         now = time.time()
         dt = now - prev_time
-
-        # TỐI ƯU 2: KHÓA FPS (MAX 10 khung hình/giây). Nếu nhanh quá, bỏ qua để không làm sập mạng trình duyệt.
-        if dt < 0.1:
-            time.sleep(0.01)
-            continue
-
         prev_time = now
         current_fps = (1.0 / dt) if dt > 0 else 10.0
-        fps_smooth = 0.85 * fps_smooth + 0.15 * current_fps
+        fps_smooth = 0.9 * fps_smooth + 0.1 * current_fps
 
         h, w, _ = frame.shape
-        persons = worker.process_frame(frame)
-        any_confirmed_fall = False
 
+        # CHỈ CHẠY AI MỖI 3 KHUNG HÌNH (Tiết kiệm 66% tải CPU)
+        if frame_counter % 3 == 0 or len(cached_persons) == 0:
+            cached_persons = worker.process_frame(frame)
+
+        any_confirmed_fall = False
         active_ids = set()
-        for p in persons:
+
+        for p in cached_persons:
             tid = p["track_id"]
             box = p["box"]
             kpts = p["keypoints"]
@@ -221,75 +223,31 @@ def generate_frames():
                 if kpt[2] > 0.20:
                     cv2.circle(frame, (int(kpt[0] * w), int(kpt[1] * h)), 3, (0, 255, 255), -1)
 
+        # Xóa tracker cũ không thấy sau 10 giây
         expired_ids = [tid for tid, trk in trackers.items() if now - trk.last_seen > 10.0]
         for tid in expired_ids:
             del trackers[tid]
 
-        cv2.rectangle(frame, (0, 0), (w, 40), (30, 30, 30), -1)
-        cv2.putText(frame, f"Fall Detection Live | FPS: {fps_smooth:.1f}", (15, 27),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-        cv2.putText(frame, f"Tracking: {len(active_ids)}", (w - 160, 27),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+        # Thanh tiêu đề trạng thái
+        cv2.rectangle(frame, (0, 0), (w, 35), (20, 20, 20), -1)
+        cv2.putText(frame, f"Fall Detection Live | Stream FPS: {fps_smooth:.1f}", (15, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Tracking: {len(active_ids)}", (w - 150, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         if any_confirmed_fall:
             cv2.rectangle(frame, (0, 0), (w - 1, h - 1), (0, 0, 255), 8)
-            cv2.rectangle(frame, (w // 2 - 220, 50), (w // 2 + 220, 95), (0, 0, 255), -1)
-            cv2.putText(frame, "!!! FALL DETECTED !!!", (w // 2 - 190, 83),
+            cv2.rectangle(frame, (w // 2 - 220, 45), (w // 2 + 220, 90), (0, 0, 255), -1)
+            cv2.putText(frame, "!!! FALL DETECTED !!!", (w // 2 - 190, 78),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-        # TỐI ƯU 3: Giảm chất lượng nén JPEG để tiết kiệm băng thông truyền tải về laptop
-        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 45])
+        # Nén ảnh nhẹ để truyền nhanh qua Wi-Fi
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
         if not ret:
             continue
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-
-@app.route("/")
-def index():
-    return """
-    <!doctype html>
-    <html lang="vi">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Giám sát té ngã</title>
-        <style>
-            body {
-                margin: 0;
-                font-family: Arial, sans-serif;
-                background: #111;
-                color: white;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-            }
-            .container {
-                width: min(96vw, 1100px);
-                text-align: center;
-            }
-            h1 {
-                margin-bottom: 16px;
-            }
-            img {
-                width: 100%;
-                max-height: 80vh;
-                border: 3px solid #2b8cff;
-                border-radius: 10px;
-                background: #000;
-                object-fit: contain;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Giám sát té ngã</h1>
-            <img src="/video_feed" alt="Live fall detection video">
-        </div>
-    </body>
-    </html>
-    """
 
 
 @app.route("/video_feed")
