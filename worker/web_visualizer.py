@@ -142,7 +142,7 @@ app = Flask(__name__)
 producer = PhoneCameraProducer().start()
 
 # Tối ưu imgsz xuống 256 để nhẹ hơn 40% so với 320
-worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.25, imgsz=256)
+worker = ONNXPoseWorker(model_path="models/yolo26n-pose.onnx", conf_thresh=0.25, imgsz=416)
 trackers = {}
 
 
